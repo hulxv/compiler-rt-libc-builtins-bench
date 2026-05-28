@@ -1,0 +1,74 @@
+# Benchmarks compiler-rt's libc-backed builtins against the legacy soft-float
+# implementations and publishes the trend to GitHub Pages.
+#
+# Metrics (all "smaller is better"):
+#   - object code size            (deterministic)
+#   - retired instructions / op   (deterministic; perf)
+#   - wall-clock ns / op          (informational; noisy on shared runners)
+name: builtins-benchmark
+permissions:
+  contents: write   # github-action-benchmark pushes to the gh-pages branch
+on:
+  schedule:
+    - cron: "0 6 * * *"          # nightly
+  workflow_dispatch:
+    inputs:
+      llvm_ref:
+        description: "llvm-project ref to benchmark"
+        default: "main"
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout benchmark repo
+        uses: actions/checkout@v4
+
+      - name: Checkout llvm-project
+        uses: actions/checkout@v4
+        with:
+          repository: llvm/llvm-project
+          ref: ${{ github.event.inputs.llvm_ref || 'main' }}
+          path: llvm-project
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang ninja-build \
+            libmpfr-dev libgmp-dev libmpc-dev linux-tools-common linux-tools-generic
+          # perf needs a relaxed paranoia level to count instructions.
+          sudo sysctl -w kernel.perf_event_paranoid=1 || true
+
+      - name: Setup sccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          max-size: 2G
+          key: builtins-bench
+          variant: sccache
+
+      - name: Run benchmark
+        run: ./run-bench "$GITHUB_WORKSPACE/llvm-project"
+
+      - name: Publish to GitHub Pages
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: compiler-rt libc builtins
+          tool: customSmallerIsBetter
+          output-file-path: results.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/bench
+          auto-push: true
+          # Flag a metric that grows >20% vs its own history; comment but
+          # don't fail (perf noise would otherwise cause false reds).
+          alert-threshold: "120%"
+          comment-on-alert: true
+          fail-on-alert: false
+
+      - name: Upload raw results
+        uses: actions/upload-artifact@v4
+        with:
+          name: results
+          path: |
+            results.json
+            build/measurements.tsv

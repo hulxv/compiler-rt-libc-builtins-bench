@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+#
+# Build compiler-rt's builtins twice (COMPILER_RT_USE_LIBC_MATH OFF / ON) and
+# measure, for each enabled builtin:
+#   - object code size (deterministic)
+#   - retired instructions per op  (deterministic; needs `perf`)
+#   - wall-clock ns per op         (informational; noisy on shared runners)
+#
+# Emits results.json in the github-action-benchmark "customSmallerIsBetter"
+# format so a CI step can publish it to GitHub Pages.
+#
+# Env / args:
+#   LLVM_SRC   path to an llvm-project checkout (has llvm/ compiler-rt/ libc/).
+#              Default: the enclosing llvm-project if run from inside one.
+#   WORK       build/output dir.            Default: ./build
+#   ENABLED    space-separated builtins.    Default: "__addtf3 __adddf3"
+#   OUT        results file.                Default: ./results.json
+#
+# Usage:  ./run-bench [llvm-src]
+
+set -euo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+HARNESS="$HERE/harness/bench.cpp"
+
+LLVM_SRC="${1:-${LLVM_SRC:-}}"
+if [ -z "$LLVM_SRC" ]; then
+  LLVM_SRC="$(git -C "$HERE" rev-parse --show-toplevel 2>/dev/null || true)"
+fi
+if [ ! -d "$LLVM_SRC/llvm" ] || [ ! -d "$LLVM_SRC/compiler-rt" ]; then
+  echo "ERROR: set LLVM_SRC to an llvm-project checkout (got '$LLVM_SRC')" >&2
+  exit 1
+fi
+
+WORK="${WORK:-$HERE/build}"
+OUT="${OUT:-$HERE/results.json}"
+ENABLED="${ENABLED:-__addtf3 __adddf3}"
+COUNT_ITERS="${COUNT_ITERS:-50000000}"
+
+CXX="${CXX:-clang++}"
+SIZE="${SIZE:-llvm-size}"; command -v "$SIZE" >/dev/null 2>&1 || SIZE=size
+AR="${AR:-llvm-ar}"; command -v "$AR" >/dev/null 2>&1 || AR=ar
+
+MEAS="$WORK/measurements.tsv"   # metric  builtin  category  mode  unit  value
+
+configure() {
+  local dir=$1 flag=$2
+  local launcher=()
+  command -v sccache >/dev/null 2>&1 &&
+    launcher=(-DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache)
+  cmake -S "$LLVM_SRC/llvm" -B "$dir" -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+    "${launcher[@]}" \
+    -DLLVM_ENABLE_PROJECTS=clang \
+    -DLLVM_ENABLE_RUNTIMES="compiler-rt;libc" \
+    -DLLVM_TARGETS_TO_BUILD=host \
+    -DCOMPILER_RT_USE_LIBC_MATH="$flag" >/dev/null
+}
+
+find_archive() {
+  local host
+  host=$(uname -m)
+  find "$1" -type f -name 'libclang_rt.builtins*.a' 2>/dev/null \
+    | grep -- "$host" | head -1
+}
+
+object_size() {   # archive builtin  -> bytes (.text + .rodata)
+  local archive=$1 name=${2#__} member tmp out
+  member=$("$AR" t "$archive" 2>/dev/null \
+    | grep -E "^${name}\.(c|cpp)\.o$" | head -1)
+  [ -z "$member" ] && { echo 0; return; }
+  tmp=$(mktemp -d)
+  ( cd "$tmp" && "$AR" x "$archive" "$member" )
+  out=$("$SIZE" "$tmp/$member" 2>/dev/null | awk 'NR==2 {print $1}')
+  rm -rf "$tmp"
+  echo "${out:-0}"
+}
+
+instr_per_op() {  # bench builtin category -> retired instructions per op
+  command -v perf >/dev/null 2>&1 || { echo ""; return; }
+  local bench=$1 b=$2 c=$3 i1 i2
+  read_instr() {
+    perf stat -x, -e instructions:u -- "$1" --count "$b" "$c" "$2" 2>&1 \
+      | awk -F, '/instructions/ {gsub(/[^0-9]/,"",$1); print $1; exit}'
+  }
+  i1=$(read_instr "$bench" "$COUNT_ITERS") || true
+  i2=$(read_instr "$bench" "$((COUNT_ITERS * 2))") || true
+  [ -z "$i1" ] || [ -z "$i2" ] && { echo ""; return; }
+  awk -v a="$i1" -v b="$i2" -v n="$COUNT_ITERS" 'BEGIN{printf "%.2f",(b-a)/n}'
+}
+
+main() {
+  mkdir -p "$WORK"
+  : > "$MEAS"
+
+  for mode in legacy libc; do
+    local dir="$WORK/$mode" flag
+    [ "$mode" = libc ] && flag=ON || flag=OFF
+    echo "== build $mode (COMPILER_RT_USE_LIBC_MATH=$flag) ==" >&2
+    [ -f "$dir/build.ninja" ] || configure "$dir" "$flag"
+    cmake --build "$dir" --target builtins --parallel >/dev/null
+  done
+
+  local legacy_a libc_a
+  legacy_a=$(find_archive "$WORK/legacy")
+  libc_a=$(find_archive "$WORK/libc")
+  [ -z "$legacy_a" ] || [ -z "$libc_a" ] && {
+    echo "ERROR: archive not found (legacy=$legacy_a libc=$libc_a)" >&2; exit 1; }
+
+  echo "== build harness ==" >&2
+  "$CXX" -O3 -std=c++17 "$HARNESS" "$legacy_a" -o "$WORK/legacy/bench"
+  "$CXX" -O3 -std=c++17 "$HARNESS" "$libc_a" -o "$WORK/libc/bench"
+
+  # Size (per builtin, per mode).
+  for b in $ENABLED; do
+    echo -e "size\t$b\t-\tlegacy\tbytes\t$(object_size "$legacy_a" "$b")" >>"$MEAS"
+    echo -e "size\t$b\t-\tlibc\tbytes\t$(object_size "$libc_a" "$b")" >>"$MEAS"
+  done
+
+  # Wall-clock ns/op (per builtin, per category, per mode).
+  pin() { command -v taskset >/dev/null 2>&1 && taskset -c 0 "$@" || "$@"; }
+  for mode in legacy libc; do
+    echo "== time $mode ==" >&2
+    pin "$WORK/$mode/bench" | tail -n +2 | while IFS=$'\t' read -r b c med _ _; do
+      echo -e "time\t$b\t$c\t$mode\tns\t$med" >>"$MEAS"
+    done
+  done
+
+  # Retired instructions per op (per builtin, per category, per mode).
+  if command -v perf >/dev/null 2>&1; then
+    for mode in legacy libc; do
+      echo "== instr $mode ==" >&2
+      for b in $ENABLED; do
+        for c in normal subnormal special cancellation; do
+          v=$(instr_per_op "$WORK/$mode/bench" "$b" "$c")
+          [ -n "$v" ] && echo -e "instr\t$b\t$c\t$mode\tinstructions\t$v" >>"$MEAS"
+        done
+      done
+    done
+  else
+    echo "== perf not available; skipping instruction counts ==" >&2
+  fi
+
+  echo "== writing $OUT ==" >&2
+  python3 "$HERE/scripts/to-json.py" "$MEAS" > "$OUT"
+  echo "wrote $OUT" >&2
+}
+
+main "$@"
