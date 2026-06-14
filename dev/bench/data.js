@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1781340520013,
+  "lastUpdate": 1781425493995,
   "repoUrl": "https://github.com/hulxv/compiler-rt-libc-builtins-bench",
   "entries": {
     "compiler-rt libc builtins": [
@@ -1951,6 +1951,128 @@ window.BENCHMARK_DATA = {
           {
             "name": "__adddf3 ns/op cancellation [libc]",
             "value": 7.863,
+            "unit": "ns"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "hulxv",
+            "username": "hulxv",
+            "email": "hulxxv@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "d2adc15af48b47ab043e90987152249ff04c1daf",
+          "message": "Update CNAME",
+          "timestamp": "2026-05-29T20:27:04Z",
+          "url": "https://github.com/hulxv/compiler-rt-libc-builtins-bench/commit/d2adc15af48b47ab043e90987152249ff04c1daf"
+        },
+        "date": 1781425493591,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "__addtf3 size [legacy]",
+            "value": 1298,
+            "unit": "bytes"
+          },
+          {
+            "name": "__addtf3 size [libc]",
+            "value": 1298,
+            "unit": "bytes"
+          },
+          {
+            "name": "__adddf3 size [legacy]",
+            "value": 868,
+            "unit": "bytes"
+          },
+          {
+            "name": "__adddf3 size [libc]",
+            "value": 868,
+            "unit": "bytes"
+          },
+          {
+            "name": "__addtf3 ns/op normal [legacy]",
+            "value": 16.043,
+            "unit": "ns"
+          },
+          {
+            "name": "__adddf3 ns/op normal [legacy]",
+            "value": 6.613,
+            "unit": "ns"
+          },
+          {
+            "name": "__addtf3 ns/op subnormal [legacy]",
+            "value": 20.905,
+            "unit": "ns"
+          },
+          {
+            "name": "__adddf3 ns/op subnormal [legacy]",
+            "value": 8.414,
+            "unit": "ns"
+          },
+          {
+            "name": "__addtf3 ns/op special [legacy]",
+            "value": 9.681,
+            "unit": "ns"
+          },
+          {
+            "name": "__adddf3 ns/op special [legacy]",
+            "value": 2.455,
+            "unit": "ns"
+          },
+          {
+            "name": "__addtf3 ns/op cancellation [legacy]",
+            "value": 14.382,
+            "unit": "ns"
+          },
+          {
+            "name": "__adddf3 ns/op cancellation [legacy]",
+            "value": 6.099,
+            "unit": "ns"
+          },
+          {
+            "name": "__addtf3 ns/op normal [libc]",
+            "value": 16.062,
+            "unit": "ns"
+          },
+          {
+            "name": "__adddf3 ns/op normal [libc]",
+            "value": 6.616,
+            "unit": "ns"
+          },
+          {
+            "name": "__addtf3 ns/op subnormal [libc]",
+            "value": 20.737,
+            "unit": "ns"
+          },
+          {
+            "name": "__adddf3 ns/op subnormal [libc]",
+            "value": 8.407,
+            "unit": "ns"
+          },
+          {
+            "name": "__addtf3 ns/op special [libc]",
+            "value": 9.714,
+            "unit": "ns"
+          },
+          {
+            "name": "__adddf3 ns/op special [libc]",
+            "value": 2.454,
+            "unit": "ns"
+          },
+          {
+            "name": "__addtf3 ns/op cancellation [libc]",
+            "value": 14.385,
+            "unit": "ns"
+          },
+          {
+            "name": "__adddf3 ns/op cancellation [libc]",
+            "value": 6.102,
             "unit": "ns"
           }
         ]
